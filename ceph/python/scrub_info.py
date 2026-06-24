@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # scrub_report function based on https://github.com/frans42/ceph-goodies/blob/main/scripts/pool-scrub-report
-import json, re
+import json, re, sys
 from datetime import datetime, timedelta
 from collections import namedtuple
 from ceph.rados import PGs, CephConf, Pools
@@ -61,7 +61,10 @@ class ScrubReportCounters:
         self.unclean += other.unclean
         self.pg_list |= other.pg_list
 
-def scrub_report(pgs, cfg, pool_id=None):
+def scrub_report(pgs, cfg, pool=None):
+    pool_id = None
+    if pool is not None:
+        pool_id = pool['pool_id']
     now = datetime.now().astimezone()
     total_scrub_diff = total_deep_scrub_diff = 0
     total_scrub_over = total_deep_scrub_over = 0
@@ -76,7 +79,7 @@ def scrub_report(pgs, cfg, pool_id=None):
         last_deep_scrub = get_stamp(pg_stat['last_deep_scrub_stamp'])
         #scrub_schedule = get_scheduled(pg_stat['scrub_schedule'])
         states = get_states(pg_stat['state'])
-        is_in_pool = pool_id and pg_stat['pgid'].startswith(f'{pool_id}.')
+        is_in_pool = pool_id and pg_stat['pgid'].startswith(f'{pool_id}.') or pool_id is None
         if is_in_pool:
             ls_diff = (now - last_scrub).total_seconds()
             if ls_diff > cfg.osd_scrub_min_interval:
@@ -102,24 +105,24 @@ def scrub_report(pgs, cfg, pool_id=None):
             if is_in_pool:
                 if 'deep' in states:
                     scrub_hist[ls_interval].pgs_deep_scrubbing += 1
-                    deep_scrub_hist[ls_interval].pgs_deep_scrubbing += 1
+                    deep_scrub_hist[lds_interval].pgs_deep_scrubbing += 1
                 else:
                     scrub_hist[ls_interval].pgs_scrubbing += 1
-                    deep_scrub_hist[ls_interval].pgs_scrubbing += 1
+                    deep_scrub_hist[lds_interval].pgs_scrubbing += 1
             is_busy = True
         elif 'active' in states and 'clean' in states:
             if is_in_pool:
                 scrub_hist[ls_interval].pg_list.add(pg_stat['pgid'])
-                deep_scrub_hist[ls_interval].pg_list.add(pg_stat['pgid'])
+                deep_scrub_hist[lds_interval].pg_list.add(pg_stat['pgid'])
         elif cfg.osd_scrub_during_recovery and 'active' in states and 'remapped' in states:
             if is_in_pool:
                 scrub_hist[ls_interval].pg_list.add(pg_stat['pgid'])
-                deep_scrub_hist[ls_interval].pg_list.add(pg_stat['pgid'])
+                deep_scrub_hist[lds_interval].pg_list.add(pg_stat['pgid'])
             is_busy = True
         else:
             if is_in_pool:
                 scrub_hist[ls_interval].unclean += 1
-                deep_scrub_hist[ls_interval].unclean += 1
+                deep_scrub_hist[lds_interval].unclean += 1
             is_busy = True
         if is_busy:
             osd_busy |= set(pg_stat['acting'])
@@ -149,8 +152,8 @@ def scrub_report(pgs, cfg, pool_id=None):
                 nidle += idle
                 print(f' [{idle} idle]', end='')
         ls_counters.pgs_deep_scrubbing > 0 and print(f' [{ls_counters.pgs_deep_scrubbing} deep scrubbing]', end='')
-        ls_counters.unclean > 0 and printf(f' [{ls_counters.unclean} unclean]', end='')
-        ls_counters.pgs_scrubbing > 0 and printf(f' [{ls_counters.pgs_scrubbing} scrubbing]', end='')
+        ls_counters.unclean > 0 and print(f' [{ls_counters.unclean} unclean]', end='')
+        ls_counters.pgs_scrubbing > 0 and print(f' [{ls_counters.pgs_scrubbing} scrubbing]', end='')
         print()
     est = total_scrub_diff / total_scrub_over / 86400 if total_scrub_over > 0 else cfg.osd_scrub_min_interval / scrub_interval_period / 3600
     estc = cfg.osd_scrub_min_interval * (1 + cfg.osd_scrub_interval_randomize_ratio / 3) / 86400
@@ -171,21 +174,19 @@ def scrub_report(pgs, cfg, pool_id=None):
     print()
 
     if pool_id:
-        pools = Pools()
-        p = pools.pool_by_id(pool_id)
         smi_eq_occup = ceil(100 / (1 + .5 * cfg.osd_scrub_interval_randomize_ratio))
-        spgs_per_bucket = smi_eq_occup * p['pg_num'] * (scrub_interval_period / 3600) / (cfg.osd_scrub_min_interval / 36)
+        spgs_per_bucket = smi_eq_occup * pool['pg_num'] * (scrub_interval_period / 3600) / (cfg.osd_scrub_min_interval / 36)
         dsmi_eq_occup = cfg.osd_deep_scrub_interval / 36 / (cfg.osd_deep_scrub_interval / 3600 + .5 * 
             (cfg.osd_scrub_min_interval / 3600 * (1 + .5 * cfg.osd_scrub_interval_randomize_ratio)))
-        dspgs_per_bucket = dsmi_eq_occup * p['pg_num'] * (deep_scrub_interval_period / 3600) / (cfg.osd_deep_scrub_interval / 36)
-    print('Configuration values used by the reports:')
-    print('scrub_min_interval={:.1f}h ({:.1f}d/{:.1f}i/{:d}%/{:.2f}PGs÷i)'.format(
+        dspgs_per_bucket = dsmi_eq_occup * pool['pg_num'] * (deep_scrub_interval_period / 3600) / (cfg.osd_deep_scrub_interval / 36)
+        print('Configuration values used by the reports:')
+        print('scrub_min_interval={:.1f}h ({:.1f}d/{:.1f}i/{:d}%/{:.2f}PGs÷i)'.format(
             cfg.osd_scrub_min_interval / 3600,
             cfg.osd_scrub_min_interval / 86400,
             cfg.osd_scrub_min_interval / scrub_interval_period,
             smi_eq_occup, spgs_per_bucket))
-    print(f'scrub_max_interval={cfg.osd_scrub_max_interval/3600}h ({cfg.osd_scrub_max_interval/86400}d)')
-    print('deep_scrub_interval={:.1f}h ({:.1f}d/~{:.2f}%/~{:.2f}PGS÷d)'.format(
+        print(f'scrub_max_interval={cfg.osd_scrub_max_interval/3600}h ({cfg.osd_scrub_max_interval/86400}d)')
+        print('deep_scrub_interval={:.1f}h ({:.1f}d/~{:.2f}%/~{:.2f}PGS÷d)'.format(
         cfg.osd_deep_scrub_interval / 3600,
         cfg.osd_deep_scrub_interval / 86400,
         dsmi_eq_occup,
@@ -200,11 +201,12 @@ def scrub_report(pgs, cfg, pool_id=None):
 
 def main():
     #pg = '30.1f0'
-    pool = 'cephfs.experiments.data'
+    poolname = 'cephfs.experiments.data'
     cluster = PGs.rados_connect()
     cfg = CephConf(rados=cluster)
     pgs = PGs(rados=cluster)
-    scrub_report(pgs, cfg, 31)
+    pools = Pools(rados=cluster)
+    scrub_report(pgs, cfg, pools.pool_by_name(poolname))
     exit(0)
     cmd = {'prefix': 'pg', 'pgid': pg, 'cmd': 'query'}
     (ret, outbuf, outs) = cluster.pg_command(pg, json.dumps(cmd), b'')

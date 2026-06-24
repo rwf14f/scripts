@@ -1,5 +1,15 @@
 import rados, re, json
 
+re_replace_inf = re.compile(r'((?:"\s*:|[,[])\s*-?)inf(\W)')
+nolfcr = str.maketrans('', '', '\n\r')
+
+def fix_json_constants(json_str):
+    # replace all occurrences of the constants 'inf' with 'Infinity' and '-inf' with '-Infinity'
+    # to make it a bit more robust, the source constant has to be preceded either by
+    # "\s*:\s* (dict key), or [\s* or ,\s* (array element)
+    # none of those combinations of characters should appear in the json that we're parsing here
+    return re_replace_inf.sub(r'\1Infinity\2', json_str.translate(nolfcr))
+
 class RadosMixin:
     @staticmethod
     def rados_connect(conffile=''):
@@ -59,7 +69,16 @@ class Pools(RadosMixin):
     def _update_pool_info(self):
         (ret, outbuf, outs) = self._rados.mon_command(json.dumps(self._pool_info_cmd), b'', target='')
         if not ret:
-            self._pool_info = json.loads(outbuf.decode('utf-8'))
+            try:
+                self._pool_info = json.loads(outbuf.decode('utf-8'))
+            except json.JSONDecodeError:
+                # a decode error is most likely caused by the json containing an 'inf' constant
+                # which the json decoder can't handle (it only allows Infinity)
+                # so try to convert 'inf' to 'Infinity' and try to reparse it
+                # this is somewhat fragile, but there's no hook in the python json parsing
+                # that would allow to work around it properly
+                # it should be sufficiently robust to parse the pool list json
+                self._pool_info = json.loads(fix_json_constants(outbuf.decode('utf-8')))
         return (not ret)
 
     @property
