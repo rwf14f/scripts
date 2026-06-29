@@ -24,6 +24,11 @@ class CephPGStatCollector(object):
         'num_objects_repaired', 'num_objects_unfound', 'num_omap_bytes', 'num_omap_keys', 'num_promote', 'num_read', 'num_read_kb',
         'num_scrub_errors', 'num_shallow_scrub_errors', 'num_whiteouts', 'num_write', 'num_write_kb',
     ]
+    _pg_states = ['active', 'clean', 'scrubbing', 'deep', 'undersized', 'degraded', 'remapped', 'backfilling', 'inconsistent', 'creating',
+        'activating', 'down', 'laggy', 'wait', 'peering', 'repair', 'recovering', 'forced_recovery', 'recovery_wait', 'recovery_toofull',
+        'recovery_unfound', 'forced_backfill', 'backfill_wait', 'backfill_toofull', 'backfill_unfound', 'incomplete', 'stale', 'peered',
+        'snaptrim', 'snaptrim_wait', 'snaptrim_error', 'unknown',
+    ]
     _pg_gauges = {
         'ceph_pg_objects_scrubbed': {'desc': 'Number of scrubbed objects', 'key': 'objects_scrubbed'},
         'ceph_pg_last_scrub_duration': {'desc': 'Last scrub duration', 'key': 'last_scrub_duration', 'unit': 'seconds'},
@@ -60,6 +65,7 @@ class CephPGStatCollector(object):
     def collect(self):
         pgs = PGs(rados=self._rados)
         pgInfo = InfoMetricFamily('ceph_pg', 'General PG info', labels = ['pgid'])
+        pgInfoState = InfoMetricFamily('ceph_pg_state', 'PG state information', labels = ['pgid'])
         for pgstat in pgs.pg_stats:
             pgid = pgstat['pgid']
             pool_id = int(pgid.split('.')[0])
@@ -68,29 +74,34 @@ class CephPGStatCollector(object):
                 'pool_id': str(pool_id),
                 'pool_name': pool_name,
                 'version': pgstat['version'],
-                'state': pgstat['state'],
             })
+            pg_states = pgstat['state'].split('+')
+            states = {}
+            for state in self._pg_states:
+                states[state] = str(int(state in pg_states))
+            pgInfoState.add_metric([pgid], states)
         yield pgInfo
+        yield pgInfoState
         for metric in self._pg_gauges:
-            pgGauge = GaugeMetricFamily(metric, self._pg_gauges[metric]['desc'], labels=['pgid', 'pool_id'], unit=self._pg_gauges[metric].get('unit', ''))
+            pgGauge = GaugeMetricFamily(metric, self._pg_gauges[metric]['desc'], labels=['pgid'], unit=self._pg_gauges[metric].get('unit', ''))
             for pgstat in pgs.pg_stats:
-                pgGauge.add_metric([pgstat['pgid'], str(pool_id)], self._pg_gauges[metric].get('convert', lambda x: x)(pgstat[self._pg_gauges[metric]['key']]))
+                pgGauge.add_metric([pgstat['pgid']], self._pg_gauges[metric].get('convert', lambda x: x)(pgstat[self._pg_gauges[metric]['key']]))
             yield pgGauge
         for metric in self._pg_stamp_gauges:
-            pgGauge = GaugeMetricFamily(metric, self._pg_stamp_gauges[metric]['desc'], labels=['pgid', 'pool_id'], unit='utctimestamp')
+            pgGauge = GaugeMetricFamily(metric, self._pg_stamp_gauges[metric]['desc'], labels=['pgid'], unit='utctimestamp')
             for pgstat in pgs.pg_stats:
-                pgGauge.add_metric([pgstat['pgid'], str(pool_id)], ceph_stamp_to_datetime(pgstat[self._pg_stamp_gauges[metric]['key']]).timestamp())
+                pgGauge.add_metric([pgstat['pgid']], ceph_stamp_to_datetime(pgstat[self._pg_stamp_gauges[metric]['key']]).timestamp())
             yield pgGauge
         for metric in self._pg_counters:
-            pgCounter = CounterMetricFamily(metric, self._pg_counters[metric]['desc'], labels=['pgid', 'pool_id'])
+            pgCounter = CounterMetricFamily(metric, self._pg_counters[metric]['desc'], labels=['pgid'])
             for pgstat in pgs.pg_stats:
-                pgCounter.add_metric([pgstat['pgid'], str(pool_id)], pgstat[self._pg_counters[metric]['key']])
+                pgCounter.add_metric([pgstat['pgid']], pgstat[self._pg_counters[metric]['key']])
             yield pgCounter
         for metric in self._pg_sum_counters:
             
-            pgCounter = CounterMetricFamily(metric, self._pg_sum_counters[metric]['desc'], labels=['pgid', 'pool_id'])
+            pgCounter = CounterMetricFamily(metric, self._pg_sum_counters[metric]['desc'], labels=['pgid'])
             for pgstat in pgs.pg_stats:
-                pgCounter.add_metric([pgstat['pgid'], str(pool_id)], pgstat['stat_sum'][self._pg_sum_counters[metric]['key']])
+                pgCounter.add_metric([pgstat['pgid']], pgstat['stat_sum'][self._pg_sum_counters[metric]['key']])
             yield pgCounter
 
 if __name__ == '__main__':
