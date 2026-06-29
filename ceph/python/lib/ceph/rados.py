@@ -65,6 +65,8 @@ class Pools(RadosMixin):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._pool_info = None
+        self._pool_by_names = {}
+        self._pool_by_ids = {}
 
     def _update_pool_info(self):
         (ret, outbuf, outs) = self._rados.mon_command(json.dumps(self._pool_info_cmd), b'', target='')
@@ -89,15 +91,21 @@ class Pools(RadosMixin):
         for pool in self._pool_info:
             yield pool
 
-    def pool_by_id(self, id):
+    def pool_by_id(self, pool_id):
+        if pool_id in self._pool_by_ids:
+            return self._pool_by_ids[pool_id]
         for p in self.pools:
-            if p['pool_id'] == id:
+            if p['pool_id'] == pool_id:
+                self._pool_by_ids[pool_id] = p
                 return p
         return None
     
     def pool_by_name(self, name):
+        if name in self._pool_by_names:
+            return self._pool_by_names[name]
         for p in self.pools:
             if p['pool_name'] == name:
+                self._pool_by_names[name] = p
                 return p
         return None
 
