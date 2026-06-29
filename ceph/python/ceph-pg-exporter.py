@@ -74,22 +74,23 @@ class CephPGStatCollector(object):
         for metric in self._pg_gauges:
             pgGauge = GaugeMetricFamily(metric, self._pg_gauges[metric]['desc'], labels=['pgid', 'pool_id'], unit=self._pg_gauges[metric].get('unit', ''))
             for pgstat in pgs.pg_stats:
-                pgGauge.add_metric([pgid, str(pool_id)], self._pg_gauges[metric].get('convert', lambda x: x)(pgstat[self._pg_gauges[metric]['key']]))
+                pgGauge.add_metric([pgstat['pgid'], str(pool_id)], self._pg_gauges[metric].get('convert', lambda x: x)(pgstat[self._pg_gauges[metric]['key']]))
             yield pgGauge
         for metric in self._pg_stamp_gauges:
             pgGauge = GaugeMetricFamily(metric, self._pg_stamp_gauges[metric]['desc'], labels=['pgid', 'pool_id'], unit='utctimestamp')
             for pgstat in pgs.pg_stats:
-                pgGauge.add_metric([pgid, str(pool_id)], ceph_stamp_to_datetime(pgstat[self._pg_stamp_gauges[metric]['key']]).timestamp())
+                pgGauge.add_metric([pgstat['pgid'], str(pool_id)], ceph_stamp_to_datetime(pgstat[self._pg_stamp_gauges[metric]['key']]).timestamp())
             yield pgGauge
         for metric in self._pg_counters:
             pgCounter = CounterMetricFamily(metric, self._pg_counters[metric]['desc'], labels=['pgid', 'pool_id'])
             for pgstat in pgs.pg_stats:
-                pgCounter.add_metric([pgid, str(pool_id)], pgstat[self._pg_counters[metric]['key']])
+                pgCounter.add_metric([pgstat['pgid'], str(pool_id)], pgstat[self._pg_counters[metric]['key']])
             yield pgCounter
         for metric in self._pg_sum_counters:
+            
             pgCounter = CounterMetricFamily(metric, self._pg_sum_counters[metric]['desc'], labels=['pgid', 'pool_id'])
             for pgstat in pgs.pg_stats:
-                pgCounter.add_metric([pgid, str(pool_id)], pgstat['stat_sum'][self._pg_sum_counters[metric]['key']])
+                pgCounter.add_metric([pgstat['pgid'], str(pool_id)], pgstat['stat_sum'][self._pg_sum_counters[metric]['key']])
             yield pgCounter
 
 if __name__ == '__main__':
