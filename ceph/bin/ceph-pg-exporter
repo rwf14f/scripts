@@ -1,0 +1,4 @@
+#!/bin/bash
+pythondir=$(readlink -f $0 | xargs dirname)/../python
+export PYTHONPATH=$pythondir/lib
+$pythondir/ceph-pg-exporter.py "$@"
