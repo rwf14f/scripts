@@ -60,7 +60,7 @@ class CephPGStatCollector(object):
     _pg_sum_counters = {}
     for key in _pg_sum_keys:
         desc = key.replace('_', ' ').title()
-        _pg_sum_counters[f'stat_sum_{key}'] = { 'desc': desc, 'key': key }
+        _pg_sum_counters[f'ceph_pg_stat_sum_{key}'] = { 'desc': desc, 'key': key }
 
     def collect(self):
         pgs = PGs(rados=self._rados)
